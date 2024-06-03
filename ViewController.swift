@@ -19,13 +19,16 @@ class ViewController: UIViewController {
         let url = Bundle.main.url(forResource: "click", withExtension: "m4a")!
         audioPlayer.setAudioFiles(urls: [url, url, url])
         
+        audioPlayer.didChange = { [weak self] in
+            self?.reloadPlaybackButton()
+        }
+        
         togglePlaybackButton.addAction(UIAction(handler: { [weak self] _ in
             if self?.audioPlayer.isPlaying == true {
                 self?.audioPlayer.pause()
             } else {
                 self?.audioPlayer.play()
             }
-            self?.reloadPlaybackButton()
         }), for: .primaryActionTriggered)
         view.addSubview(togglePlaybackButton)
         

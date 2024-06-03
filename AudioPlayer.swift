@@ -7,8 +7,11 @@
 
 import Foundation
 import AVFoundation
+import MediaPlayer
 
 class AudioPlayer {
+    
+    var didChange: (() -> Void)?
     
     private let engine = AVAudioEngine()
     private let mixerNode = AVAudioMixerNode()
@@ -20,7 +23,7 @@ class AudioPlayer {
     }
     
     var isPlaying: Bool {
-        return engine.isRunning
+        return players.first?.player.isPlaying == true
     }
     
     
@@ -28,10 +31,14 @@ class AudioPlayer {
     
     init() {
         engine.attach(mixerNode)
+        
+        setupControlCenter()
     }
     
     
     // MARK: Set files
+    
+    private var duration: TimeInterval = 0
     
     func setAudioFiles(urls: [URL]) {
         // Cleanup if needed
@@ -47,6 +54,8 @@ class AudioPlayer {
         // The file to use for processingFormat. Not sure if this is correct,
         // but unsure how else to get a format to pass for the mixerNode -> engine
         guard let referenceFile = files.first else { return }
+        
+        duration = Double(referenceFile.length) / referenceFile.processingFormat.sampleRate
         
         // Connect the mixer. This is necessary because in actual usage I have a time pitch unit
         // in between the mixer and engine.
@@ -149,6 +158,9 @@ class AudioPlayer {
                 player.player.play(at: nil)
             }
             
+            didChange?()
+            updateNowPlayingInfo()
+            
             return
         }
         
@@ -176,6 +188,9 @@ class AudioPlayer {
             // Not sure how to handle if files are different sample rates?
             player.player.play(at: startTime)
         }
+        
+        didChange?()
+        updateNowPlayingInfo()
     }
     
     
@@ -189,10 +204,16 @@ class AudioPlayer {
         
         pauseRenderTime = players.first?.player.lastRenderTime
         
-        engine.pause()
-        engine.reset()
+        // If engine.pause is commented out, control center always shows a pause icon
+        // even when the playes are paused and rate is
+        // set to 0 in MPNowPlayingInfoPropertyPlaybackRate
+//        engine.pause()
+//        engine.reset()
         
         players.forEach { $0.player.pause() }
+        
+        didChange?()
+        updateNowPlayingInfo()
     }
     
     
@@ -226,7 +247,7 @@ class AudioPlayer {
     
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default , policy: .longFormAudio, options: [])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default , policy: .longFormAudio)
             try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print(error)
@@ -239,6 +260,78 @@ class AudioPlayer {
         } catch {
             print(error)
         }
+    }
+    
+    
+    // MARK: Control center
+    
+    private func updateNowPlayingInfo() {
+        let infoCenter = MPNowPlayingInfoCenter.default()
+        
+        var info = [String : Any]()
+        
+        info[MPMediaItemPropertyTitle] = "Test title"
+        info[MPMediaItemPropertyArtist] = "Test artist"
+        
+        info[MPNowPlayingInfoPropertyPlaybackRate] = {
+            if self.isPlaying {
+                return NSNumber(value: 1)
+            }
+            
+            return NSNumber(value: 0)
+        }()
+        
+        info[MPMediaItemPropertyPlaybackDuration] = duration
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = 0
+        
+        infoCenter.nowPlayingInfo = info
+        
+        let commandCenter = MPRemoteCommandCenter.shared()
+        
+        // Explicitly trying to override the control center's pause behavior.
+        // Behaves the same with and without this code.
+        if isPlaying {
+            commandCenter.pauseCommand.isEnabled = false
+            commandCenter.playCommand.isEnabled = true
+        }
+        else {
+            commandCenter.pauseCommand.isEnabled = true
+            commandCenter.playCommand.isEnabled = false
+        }
+    }
+    
+    private func setupControlCenter() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
+        commandCenter.skipBackwardCommand.isEnabled = false
+        commandCenter.skipForwardCommand.isEnabled = false
+        commandCenter.seekForwardCommand.isEnabled = false
+        commandCenter.seekBackwardCommand.isEnabled = false
+        commandCenter.changePlaybackRateCommand.isEnabled = false
+        
+        commandCenter.togglePlayPauseCommand.addTarget { _ in
+            return .commandFailed
+        }
+        
+        commandCenter.playCommand.addTarget { _ in
+            return .commandFailed
+        }
+        
+        commandCenter.pauseCommand.addTarget { _ in
+            return .commandFailed
+        }
+        
+        commandCenter.changePlaybackPositionCommand.addTarget { event in
+            if let event = event as? MPChangePlaybackPositionCommandEvent {
+                return .commandFailed
+            }
+            
+            return .commandFailed
+        }
+        
+        self.updateNowPlayingInfo()
     }
     
     
